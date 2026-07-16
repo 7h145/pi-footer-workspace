@@ -1,0 +1,19 @@
+{
+  "name": "pi-footer-workspace",
+  "version": "0.1.0",
+  "description": "Show Git and workspace writability status in Pi's footer.",
+  "type": "module",
+  "license": "CC-BY-4.0",
+  "keywords": ["pi-package", "pi", "footer", "git", "workspace"],
+  "pi": {
+    "extensions": ["./pi-footer-workspace.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.80.4"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
+  }
+}
