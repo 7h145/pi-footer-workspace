@@ -35,24 +35,32 @@ export default function footerWorkspace(pi: ExtensionAPI) {
 	let gitChangeCount: number | undefined;
 	let cwdReadOnly: boolean | undefined;
 	let cwdReadOnlyCheckedPath: string | undefined;
+	const publishedStatuses = new Map<string, string | undefined>();
 
 	let refreshInFlight = false;
 	let queuedRefreshCtx: ExtensionContext | undefined;
 	let queuedRefreshNeedsReadOnly = false;
 
+	function setStatusIfChanged(ctx: ExtensionContext, key: string, value: string | undefined): void {
+		if (publishedStatuses.has(key) && publishedStatuses.get(key) === value) return;
+		publishedStatuses.set(key, value);
+		ctx.ui.setStatus(key, value);
+	}
+
 	function publish(ctx: ExtensionContext): void {
 		if (ctx.mode !== "tui" || !sessionActive) return;
 
 		const readOnlyText = cwdReadOnly ? ctx.ui.theme.fg("warning", "(ro)") : undefined;
-		ctx.ui.setStatus(LEFT_READ_ONLY_KEY, readOnlyText);
+		setStatusIfChanged(ctx, LEFT_READ_ONLY_KEY, readOnlyText);
 
 		if (gitChangeCount === undefined) {
-			ctx.ui.setStatus(RIGHT_GIT_KEY, undefined);
+			setStatusIfChanged(ctx, RIGHT_GIT_KEY, undefined);
 			return;
 		}
 
 		const text = gitChangeCount === 0 ? "clean" : `${gitChangeCount} change${gitChangeCount === 1 ? "" : "s"}`;
-		ctx.ui.setStatus(
+		setStatusIfChanged(
+			ctx,
 			RIGHT_GIT_KEY,
 			gitChangeCount === 0 ? ctx.ui.theme.fg("success", text) : ctx.ui.theme.fg("warning", text),
 		);
@@ -170,6 +178,7 @@ export default function footerWorkspace(pi: ExtensionAPI) {
 		cwdReadOnlyCheckedPath = undefined;
 		queuedRefreshCtx = undefined;
 		queuedRefreshNeedsReadOnly = false;
+		publishedStatuses.clear();
 
 		ctx.ui.setStatus(LEFT_READ_ONLY_KEY, undefined);
 		ctx.ui.setStatus(RIGHT_GIT_KEY, undefined);
