@@ -9,7 +9,7 @@
  * compositor, Pi displays the values on its ordinary extension-status line.
  *
  * Author: thias <github.attic@typedef.net>, OpenAI Codex (5.6)
- * License: CC BY 4.0
+ * License: MIT
  * Version: 0.1
  * Date: 2026-07-16
  * Last verified with Pi: 0.80.6

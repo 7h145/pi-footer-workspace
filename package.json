@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Show Git and workspace writability status in Pi's footer.",
   "type": "module",
-  "license": "CC-BY-4.0",
+  "license": "MIT",
   "keywords": ["pi-package", "pi", "footer", "git", "workspace"],
   "pi": {
     "extensions": ["./pi-footer-workspace.ts"]
