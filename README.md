@@ -52,9 +52,6 @@ pi install git:github.com/7h145/pi-footer-compositor
 These are personal/global installs. Add `-l` to each command for project-local
 installs. Run `/reload` after installing or updating while Pi is running.
 
-If you already use these extensions through `pi-assorted`, disable those copies
-with `pi config` before installing the standalone packages.
-
 To try a local checkout without installing, run from its root:
 
 ```bash
@@ -65,3 +62,22 @@ This loads only the checkout's extension, without the optional compositor or
 duplicate installed copies.
 
 Last verified with Pi 0.80.6.
+
+### Migrating from pi-assorted
+
+If you have the legacy [`pi-assorted`](https://github.com/7h145/pi-assorted)
+collection installed, turn off its pi-footer-workspace extension before installing this
+standalone version. Otherwise Pi will try to load the same extension twice.
+
+Run `pi config` in a terminal. Under the `pi-assorted` package's Extensions
+entries, select `pi-footer-workspace/pi-footer-workspace.ts` and press Space to uncheck it
+(`[ ]`). Changes are saved immediately; press Esc to close.
+
+For a project-local collection installation, run `pi config -l` from that
+project and press Space until the entry shows `[-]` (project unload).
+
+If you also install the compositor separately, turn off its
+`pi-footer-compositor/pi-footer-compositor.ts` entry in the collection too.
+
+See Pi's [resource settings reference](https://pi.dev/docs/latest/settings#resources)
+for configuration details.
