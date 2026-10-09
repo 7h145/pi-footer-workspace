@@ -17,43 +17,51 @@ Force an immediate refresh with:
 /footer-workspace-refresh
 ```
 
-## Dependency on pi-footer-compositor
+## Optional pi-footer-compositor integration
 
 For first-line placement, install and enable
-[`pi-footer-compositor`](../pi-footer-compositor/). The compositor relocates the
-workspace statuses into its left and right slots:
+[`pi-footer-compositor`](https://github.com/7h145/pi-footer-compositor).
+The compositor relocates the workspace statuses into its left and right slots:
 
 ```text
 /stage (ro)                                             3 changes
 ↑278k ↓19k ...                               gpt-5.6-sol • medium
 ```
 
-Pi does not currently have a manifest mechanism for extension-to-extension
-activation dependencies. Consequently this is an **optional, gracefully
-degraded dependency**: without `pi-footer-compositor`, the extension still
-works, but Pi displays its values on the ordinary extension-status line instead.
-Installing the complete `pi-assorted` package loads both extensions.
+The compositor is optional and is not installed automatically. Without it,
+the extension still works, but Pi displays its values on the ordinary
+extension-status line instead.
 
 Unlike the older standalone `footer-status.ts`, this extension does not patch
 Pi's footer. Do not run that old extension alongside `pi-footer-compositor`.
 
 ## Installation
 
-Install the complete package:
+Install this extension from GitHub:
 
 ```bash
-pi install git:github.com/7h145/pi-assorted
+pi install git:github.com/7h145/pi-footer-workspace
 ```
 
-Or load both files directly from the repository root:
+For first-line footer placement, also install the optional compositor:
 
 ```bash
-pi \
-  -e ./extensions/pi-footer-compositor/pi-footer-compositor.ts \
-  -e ./extensions/pi-footer-workspace/pi-footer-workspace.ts
+pi install git:github.com/7h145/pi-footer-compositor
 ```
 
-If `pi-assorted` is already installed, disable the installed copies with
-`pi config`, or add `--no-extensions` for an isolated run.
+These are personal/global installs. Add `-l` to each command for project-local
+installs. Run `/reload` after installing or updating while Pi is running.
+
+If you already use these extensions through `pi-assorted`, disable those copies
+with `pi config` before installing the standalone packages.
+
+To try a local checkout without installing, run from its root:
+
+```bash
+pi --no-extensions -e .
+```
+
+This loads only the checkout's extension, without the optional compositor or
+duplicate installed copies.
 
 Last verified with Pi 0.80.6.
