@@ -175,7 +175,9 @@ the interactive view.
 In TUI mode, known repositories are refreshed every 15 seconds while Pi is
 idle. File-changing built-in tools, `codemode` and the settled-agent event
 schedule a refresh after a 500 ms debounce. Ordinary read-tool results do not.
-Discovery is repeated at startup and on manual commands, not on every poll.
+Polls reuse the discovered repository list. Startup and manual commands repeat
+discovery; if initial discovery fails entirely, polling retries it until a list
+is available.
 
 At most two repository status requests run concurrently. Git requests have a
 two-second waiting deadline; interrupted, failed or malformed results are not
@@ -230,9 +232,27 @@ npm run check
 
 `check` runs strict TypeScript checks and Node's regression tests. Tests use
 disposable local Git repositories and synthetic failures; they do not fetch or
-contact a model provider.
+contact a model provider. CI runs these checks on Node.js 24 with Pi SDKs 1.0.2
+and 1.1.0.
 
 The entry point registers flags, commands and lifecycle hooks. `src/discovery.ts`
 owns workspace scope and configuration, `src/git.ts` collects and parses Git
 status, `src/session.ts` owns requests and cancellation, and `src/view.ts` renders
 the read-only snapshot. `src/probe.ts` limits cleanup to probes it created.
+
+## Last confirmed working
+
+| Date | Code revision | Pi | Node.js | Platform | Git |
+|---|---|---|---|---|---|
+| 2026-10-11 | `3cdaea1` | `1.1.0` | `26.10.0` | Linux x64 | `2.47.3` |
+
+**Checked:** 68 automated regression tests and type checking; isolated scripted
+regular/fullscreen TUI with actual disposable Git repositories, with and without
+the compositor. Checks covered multi-repository summaries, the explicit root
+from inside a product, a read-only working directory, command navigation,
+escaped filenames, resizing, notices, reload and exit. Manual RPC reports also
+passed; print/JSON mode guards were checked by automated tests. Type checking
+and all 68 tests additionally passed with Pi SDKs 1.0.2 and 1.1.0 on Node.js
+24.21.0. Fault cases used synthetic failures; no remote or model was contacted.
+
+One known-working configuration, not a supported-version range.
