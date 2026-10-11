@@ -76,3 +76,10 @@ test("real tracking refs produce ahead/behind without a fetch", async t => {
 	assert.equal(result.status?.behind, 0);
 	assert.equal(result.status?.changes.length, 0);
 });
+
+test("complete Git waiting deadline releases even an unresponsive executor", async t => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const task = readStatus(() => new Promise(() => {}), ".", signal());
+	t.mock.timers.tick(2_000);
+	assert.equal((await task).error, "Git request timed out");
+});

@@ -62,3 +62,27 @@ test("bad configuration is not silently replaced by defaults", async t => {
 	await writeFile(join(root, ".pi", "workspace.json"), "not json");
 	await assert.rejects(discover(exec, root, undefined, signal()), /workspace.json/);
 });
+
+test("submodule Git files are discovered as distinct worktrees", async t => {
+	const root = await repository(await temporary(t));
+	const source = await repository(await temporary(t));
+	await git(root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", source, "product");
+	assert.deepEqual((await discover(exec, root, undefined, signal())).repositories.map(repo => repo.label), ["workspace", "product"]);
+});
+test("missing includes leave scope visibly incomplete", async t => {
+	const root = await temporary(t);await mkdir(join(root, ".pi"));
+	await writeFile(join(root, ".pi", "workspace.json"), JSON.stringify({ include: ["missing"] }));
+	const inventory = await discover(exec, root, undefined, signal());
+	assert.equal(inventory.repositories.length, 0);assert.match(inventory.issues[0], /included repository/);
+});
+test("an unavailable Git executable is not mistaken for an empty workspace", async t => {
+	const root = await temporary(t);
+	const inventory = await discover(async () => ({ code: 1, killed: false, stdout: "", stderr: "" }), root, undefined, signal());
+	assert.ok(inventory.issues.length > 0);
+});
+test("null configuration lists are invalid", () => assert.throws(() => parseConfig('{"include":null}')));
+
+test("a child named workspace does not collide with the root label", async t => {
+	const root = await repository(await temporary(t));await repository(join(root, "workspace"));
+	assert.deepEqual((await discover(exec, root, undefined, signal())).repositories.map(repo => repo.label), ["workspace", "./workspace"]);
+});

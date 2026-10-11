@@ -1,3 +1,5 @@
+import type { GitStatus } from "../src/git.ts";
+import type { Dependencies } from "../src/session.ts";
 import { execFile } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -36,3 +38,10 @@ export function deferred<T>() {
 	return { promise, resolve, reject };
 }
 export const flush = async () => { for (let i = 0; i < 8; i++) await new Promise<void>(resolve => setImmediate(resolve)); };
+
+export const clean: GitStatus = { branch: "main", changes: [] };
+export function fakeDependencies(): Dependencies {
+	return { exec: async () => ({ code: 0, stdout: "", stderr: "", killed: false }),
+		discover: async (_exec, cwd) => ({ root: cwd, repositories: [{ path: cwd, label: "workspace" }], issues: [] }),
+		readStatus: async () => ({ status: clean }), probe: async () => ({ readOnly: false }) };
+}

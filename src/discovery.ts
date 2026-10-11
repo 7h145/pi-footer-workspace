@@ -13,7 +13,7 @@ export function parseConfig(text: string): Config {
 	if (Object.keys(data).some(key => key !== "include" && key !== "exclude")) throw new Error("Unknown setting");
 	const result: Config = { include: [], exclude: [] };
 	for (const key of ["include", "exclude"] as const) {
-		const list = data[key] ?? [];
+		const list = data[key] === undefined ? [] : data[key];
 		if (!Array.isArray(list) || list.some(item => typeof item !== "string" || !item || item.includes("\0"))) throw new Error("Expected nonempty paths");
 		result[key] = list as string[];
 	}
@@ -85,8 +85,9 @@ export async function discover(exec: Exec, cwd: string, explicitRoot: string | u
 			if (candidate.required) inventory.issues.push(`Included path is not a worktree root: ${candidate.directory}`);
 			continue;
 		}
+		const relative = path.relative(root, directory);
 		inventory.repositories.push({ path: directory,
-			label: directory === root ? "workspace" : path.relative(root, directory) || "workspace" });
+			label: directory === root ? "workspace" : relative === "workspace" ? "./workspace" : relative });
 	}
 	return inventory;
 }

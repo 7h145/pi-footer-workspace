@@ -1,198 +1,148 @@
 /** pi-footer-workspace
  *
- * Purpose: publish compact workspace status: `(ro)` when the current directory
- * is not writable and `clean`, `1 change`, or `N changes` for a Git worktree.
+ * Purpose: summarize the owning and product Git worktrees, with a read-only
+ * /workspace overview and an optional working-directory (ro) marker.
  *
- * Strategy: probe writability when the working directory changes and refresh
- * Git status every five seconds plus after relevant Pi activity. Publish only
- * through `ctx.ui.setStatus()` using pi-footer-compositor keys; without the
- * compositor, Pi displays the values on its ordinary extension-status line.
+ * Strategy: discover shallowly, collect local Git status with bounded parallel
+ * requests, and publish through Pi's public status API. Each session owns its
+ * work and queue; no late result may update a replacement session.
  *
  * Author: thias <github.attic@typedef.net>, OpenAI Codex (5.6)
  * License: MIT
  * Version: 0.1
  * Date: 2026-07-16
- * Last verified with Pi: 0.80.6
+ * Last verified with Pi: 1.1.0
  */
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { resolve } from "node:path";
+import { dependencies, WorkspaceSession, type Dependencies } from "./src/session.ts";
+import { details, overview, summary } from "./src/format.ts";
+import { WorkspaceView } from "./src/view.ts";
 
-import { type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { promises as fs } from "node:fs";
-import * as path from "node:path";
+const LEFT_KEY = "footer-compositor:left:10:workspace-read-only";
+const RIGHT_KEY = "footer-compositor:right:10:workspace-git";
+const POLL_MS = 15_000;
+const STALE_MS = 60_000;
+const DEBOUNCE_MS = 500;
 
-const GIT_REFRESH_INTERVAL_MS = 5_000;
-const LEFT_READ_ONLY_KEY = "footer-compositor:left:10:workspace-read-only";
-const RIGHT_GIT_KEY = "footer-compositor:right:10:workspace-git";
-const REFRESH_COMMAND = "footer-workspace-refresh";
+export default function footerWorkspace(pi: ExtensionAPI) { setup(pi, dependencies(pi.exec.bind(pi))); }
 
-type RefreshOptions = { forceReadOnly?: boolean };
-
-export default function footerWorkspace(pi: ExtensionAPI) {
-	let gitRefreshInterval: ReturnType<typeof setInterval> | undefined;
+/** Dependency injection is used only by the regression tests. */
+export function setup(pi: ExtensionAPI, deps: Dependencies) {
+	let session: WorkspaceSession | undefined;
 	let latestCtx: ExtensionContext | undefined;
-	let sessionActive = false;
-	let sessionEpoch = 0;
+	let displayTimer: ReturnType<typeof setInterval> | undefined;
+	let debounce: ReturnType<typeof setTimeout> | undefined;
+	let nextPoll = 0;
+	let configuredRoot: string | undefined;
+	let rootResolved = false;
+	const published = new Map<string, string | undefined>();
+	pi.registerFlag("workspace-root", { type: "string", description: "Root for workspace repository discovery (relative to startup cwd)" });
 
-	let gitChangeCount: number | undefined;
-	let cwdReadOnly: boolean | undefined;
-	let cwdReadOnlyCheckedPath: string | undefined;
-	const publishedStatuses = new Map<string, string | undefined>();
-
-	let refreshInFlight = false;
-	let queuedRefreshCtx: ExtensionContext | undefined;
-	let queuedRefreshNeedsReadOnly = false;
-
-	function setStatusIfChanged(ctx: ExtensionContext, key: string, value: string | undefined): void {
-		if (publishedStatuses.has(key) && publishedStatuses.get(key) === value) return;
-		publishedStatuses.set(key, value);
-		ctx.ui.setStatus(key, value);
+	function setStatus(ctx: ExtensionContext, key: string, text: string | undefined) {
+		if (published.has(key) && published.get(key) === text) return;
+		published.set(key, text);
+		ctx.ui.setStatus(key, text);
 	}
-
-	function publish(ctx: ExtensionContext): void {
-		if (ctx.mode !== "tui" || !sessionActive) return;
-
-		const readOnlyText = cwdReadOnly ? ctx.ui.theme.fg("warning", "(ro)") : undefined;
-		setStatusIfChanged(ctx, LEFT_READ_ONLY_KEY, readOnlyText);
-
-		if (gitChangeCount === undefined) {
-			setStatusIfChanged(ctx, RIGHT_GIT_KEY, undefined);
-			return;
-		}
-
-		const text = gitChangeCount === 0 ? "clean" : `${gitChangeCount} change${gitChangeCount === 1 ? "" : "s"}`;
-		setStatusIfChanged(
-			ctx,
-			RIGHT_GIT_KEY,
-			gitChangeCount === 0 ? ctx.ui.theme.fg("success", text) : ctx.ui.theme.fg("warning", text),
-		);
+	function publish(ctx: ExtensionContext) {
+		if (ctx.mode !== "tui" || !session || session.closed) return;
+		const snapshot = session.snapshot;
+		setStatus(ctx, LEFT_KEY, snapshot?.writability.readOnly ? ctx.ui.theme.fg("warning", "(ro)") : undefined);
+		const value = snapshot ? summary(snapshot) : undefined;
+		const stale = snapshot && Date.now() - snapshot.updatedAt >= STALE_MS;
+		setStatus(ctx, RIGHT_KEY, value ? ctx.ui.theme.fg(stale ? "warning" : value.color, value.text + (stale ? "?" : "")) : undefined);
 	}
-
-	async function getGitChangeCount(ctx: ExtensionContext): Promise<number | undefined> {
-		const result = await pi.exec("git", ["-C", ctx.cwd, "status", "--porcelain"], { timeout: 2_000 });
-		if (result.code !== 0) return undefined;
-
-		return result.stdout
-			.split("\n")
-			.map((line) => line.trim())
-			.filter(Boolean).length;
-	}
-
-	async function isPathReadOnly(directory: string): Promise<boolean> {
-		const probePath = path.join(
-			directory,
-			`.pi-write-probe-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-		);
-
-		let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-		try {
-			handle = await fs.open(probePath, "wx");
-			return false;
-		} catch {
-			return true;
-		} finally {
-			await handle?.close().catch(() => undefined);
-			await fs.unlink(probePath).catch(() => undefined);
-		}
-	}
-
-	function shouldRefreshReadOnly(ctx: ExtensionContext, options: RefreshOptions): boolean {
-		return options.forceReadOnly === true || cwdReadOnlyCheckedPath !== ctx.cwd;
-	}
-
-	async function refresh(ctx: ExtensionContext, options: RefreshOptions = {}): Promise<void> {
-		if (ctx.mode !== "tui" || !sessionActive) return;
-		latestCtx = ctx;
-		const refreshReadOnly = shouldRefreshReadOnly(ctx, options);
-
-		if (refreshInFlight) {
-			queuedRefreshCtx = ctx;
-			queuedRefreshNeedsReadOnly ||= refreshReadOnly;
-			return;
-		}
-
-		const refreshEpoch = sessionEpoch;
-		refreshInFlight = true;
-		try {
-			gitChangeCount = await getGitChangeCount(ctx);
-			if (!sessionActive || refreshEpoch !== sessionEpoch) return;
-
-			if (refreshReadOnly) {
-				cwdReadOnly = await isPathReadOnly(ctx.cwd);
-				if (!sessionActive || refreshEpoch !== sessionEpoch) return;
-				cwdReadOnlyCheckedPath = ctx.cwd;
-			}
-
-			publish(ctx);
-		} finally {
-			refreshInFlight = false;
-			if (sessionActive && refreshEpoch === sessionEpoch && queuedRefreshCtx) {
-				const rerunCtx = queuedRefreshCtx;
-				const forceReadOnly = queuedRefreshNeedsReadOnly;
-				queuedRefreshCtx = undefined;
-				queuedRefreshNeedsReadOnly = false;
-				void refresh(rerunCtx, { forceReadOnly });
-			} else {
-				queuedRefreshCtx = undefined;
-				queuedRefreshNeedsReadOnly = false;
-			}
-		}
-	}
-
-	function startRefreshTimer(ctx: ExtensionContext): void {
-		if (gitRefreshInterval) clearInterval(gitRefreshInterval);
-		gitRefreshInterval = setInterval(() => {
-			if (latestCtx) void refresh(latestCtx);
-		}, GIT_REFRESH_INTERVAL_MS);
-		gitRefreshInterval.unref();
-		void refresh(ctx, { forceReadOnly: true });
-	}
-
-	pi.on("session_start", (_event, ctx) => {
-		if (ctx.mode !== "tui") return;
-		sessionActive = true;
-		sessionEpoch++;
-		latestCtx = ctx;
-		startRefreshTimer(ctx);
-	});
-
-	pi.on("input", (_event, ctx) => {
-		void refresh(ctx);
-	});
-
-	pi.on("tool_result", (_event, ctx) => {
-		void refresh(ctx);
-	});
-
-	pi.on("turn_end", (_event, ctx) => {
-		void refresh(ctx);
-	});
-
-	pi.on("session_shutdown", (_event, ctx) => {
-		sessionActive = false;
-		sessionEpoch++;
-
-		if (gitRefreshInterval) clearInterval(gitRefreshInterval);
-		gitRefreshInterval = undefined;
+	function dispose() {
+		session?.stop();
+		session = undefined;
 		latestCtx = undefined;
-		gitChangeCount = undefined;
-		cwdReadOnly = undefined;
-		cwdReadOnlyCheckedPath = undefined;
-		queuedRefreshCtx = undefined;
-		queuedRefreshNeedsReadOnly = false;
-		publishedStatuses.clear();
-
-		ctx.ui.setStatus(LEFT_READ_ONLY_KEY, undefined);
-		ctx.ui.setStatus(RIGHT_GIT_KEY, undefined);
+		if (displayTimer) clearInterval(displayTimer);
+		if (debounce) clearTimeout(debounce);
+		displayTimer = debounce = undefined;
+		published.clear();
+	}
+	function start(ctx: ExtensionContext) {
+		dispose();
+		if (!rootResolved) {
+			const flag = pi.getFlag("workspace-root");
+			configuredRoot = typeof flag === "string" && flag ? resolve(ctx.cwd, flag) : undefined;
+			rootResolved = true;
+		}
+		latestCtx = ctx;
+		const current = new WorkspaceSession(ctx.cwd, configuredRoot, deps, () => {
+			if (session === current && latestCtx) publish(latestCtx);
+		});
+		session = current;
+		nextPoll = Date.now() + POLL_MS;
+		if (ctx.mode === "tui") {
+			setStatus(ctx, LEFT_KEY, undefined);
+			setStatus(ctx, RIGHT_KEY, undefined);
+			void current.request({ discover: true, probe: true }).catch(() => {});
+			displayTimer = setInterval(() => {
+				const ctx = latestCtx;
+				if (!ctx || session !== current || current.closed) return;
+				publish(ctx);
+				if (Date.now() >= nextPoll && !current.busy && ctx.isIdle()) {
+					nextPoll = Date.now() + POLL_MS;
+					void current.request().catch(() => {});
+				}
+			}, 1_000);
+			displayTimer.unref();
+		}
+	}
+	function currentSession(ctx: ExtensionContext) {
+		if (!session || session.closed || session.cwd !== ctx.cwd) start(ctx);
+		latestCtx = ctx;
+		return session!;
+	}
+	function schedule(ctx: ExtensionContext) {
+		if (ctx.mode !== "tui" || !session || session.closed) return;
+		const current = currentSession(ctx);
+		if (debounce) clearTimeout(debounce);
+		debounce = setTimeout(() => {
+			debounce = undefined;
+			if (session !== current || current.closed) return;
+			nextPoll = Date.now() + POLL_MS;
+			void current.request().catch(() => {});
+		}, DEBOUNCE_MS);
+		debounce.unref();
+	}
+	pi.on("session_start", (_event, ctx) => start(ctx));
+	pi.on("tool_result", (event, ctx) => {
+		if (!event.isError && ["write", "edit", "bash", "codemode"].includes(event.toolName)) schedule(ctx);
+	});
+	pi.on("agent_settled", (_event, ctx) => schedule(ctx));
+	pi.on("session_shutdown", (_event, ctx) => {
+		dispose();
+		if (ctx.mode === "tui") {
+			ctx.ui.setStatus(LEFT_KEY, undefined);
+			ctx.ui.setStatus(RIGHT_KEY, undefined);
+		}
 	});
 
-	pi.registerCommand(REFRESH_COMMAND, {
-		description: "Refresh footer Git and workspace writability status",
-		handler: async (_args, ctx) => {
-			if (ctx.mode !== "tui") {
-				ctx.ui.notify("Footer workspace status is available only in TUI mode", "warning");
+	async function command(args: string, ctx: ExtensionContext, refreshOnly: boolean) {
+		if (!ctx.hasUI) throw new Error("/workspace requires TUI or RPC mode; no workspace scan was started");
+		const current = currentSession(ctx);
+		try {
+			const snapshot = await current.request({ discover: true, probe: true });
+			if (session !== current || current.closed) return;
+			nextPoll = Date.now() + POLL_MS;
+			if (refreshOnly) { ctx.ui.notify(overview(snapshot).join("\n"), "info"); return; }
+			const name = args.trim();
+			const index = name ? snapshot.repositories.findIndex(repo => repo.label === name || repo.path === name) : undefined;
+			if (index === -1) { ctx.ui.notify("Repository not in this workspace. Run /workspace to see repository names.", "warning"); return; }
+			if (ctx.mode === "rpc") {
+				ctx.ui.notify((index === undefined ? overview(snapshot) : details(snapshot.repositories[index])).join("\n"), "info");
 				return;
 			}
-			await refresh(ctx, { forceReadOnly: true });
-			ctx.ui.notify("Footer workspace status refreshed", "info");
-		},
-	});
+			await ctx.ui.custom<void>((tui, theme, _keys, done) =>
+				new WorkspaceView(snapshot, theme, () => tui.terminal.rows, () => tui.requestRender(), () => done(), index));
+		} catch {
+			if (session === current && !current.closed) ctx.ui.notify("Workspace refresh failed", "error");
+		}
+	}
+	pi.registerCommand("workspace", { description: "Refresh and inspect workspace repositories (optional repository name)",
+		handler: (args, ctx) => command(args, ctx, false) });
+	pi.registerCommand("footer-workspace-refresh", { description: "Refresh workspace discovery, Git status and writability",
+		handler: (args, ctx) => command(args, ctx, true) });
 }
