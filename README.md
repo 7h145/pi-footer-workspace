@@ -14,12 +14,25 @@ read-only container mount.
 
 Requires **Pi 1.0.2 or newer** and Git on `PATH`.
 
+Install this extension from GitHub:
+
 ```bash
 pi install git:github.com/7h145/pi-footer-workspace
 ```
 
-This installs for your user. Add `-l` for a project-local installation. Run
-`/reload` after installing or updating while Pi is running, then run:
+For first-line footer placement, also install the optional
+[`pi-footer-compositor`](https://github.com/7h145/pi-footer-compositor):
+
+```bash
+pi install git:github.com/7h145/pi-footer-compositor
+```
+
+These are personal/global installs. Add `-l` to each command for project-local
+installs. The compositor is not installed automatically; without it, Pi shows
+the same values on its ordinary extension-status line. This extension uses only
+Pi's public status API and does not patch or replace the footer.
+
+Run `/reload` after installing or updating while Pi is running, then run:
 
 ```text
 /workspace
@@ -37,21 +50,8 @@ To try a local checkout without installing, run from its root:
 pi --no-extensions -e .
 ```
 
-This loads only the checkout's extension, without duplicate installed copies.
-
-### Optional first-line footer placement
-
-Install and enable
-[`pi-footer-compositor`](https://github.com/7h145/pi-footer-compositor)
-to place the summary on the first footer line:
-
-```bash
-pi install git:github.com/7h145/pi-footer-compositor
-```
-
-The compositor is not installed automatically. Without it, Pi shows the same
-values on its ordinary extension-status line. This extension uses only Pi's
-public status API and does not patch or replace the footer.
+This loads only the checkout's extension, without the optional compositor or
+duplicate installed copies. Then run `/workspace`.
 
 ## Workspace scope
 
@@ -81,7 +81,9 @@ Relative flag paths resolve against Pi's startup working directory.
 
 ### Include or exclude repositories
 
-Create `.pi/workspace.json` under the chosen workspace root:
+Create `.pi/workspace.json` under the **workspace root**: the directory selected
+by `--workspace-root`, or by default the Git worktree containing Pi's working
+directory (the working directory itself if it is outside Git).
 
 ```json
 {
@@ -90,11 +92,19 @@ Create `.pi/workspace.json` under the chosen workspace root:
 }
 ```
 
-Paths are relative to that root unless absolute. They identify exact worktree
-roots, not glob patterns. Includes can opt into deeper paths, symlinked paths or
-repositories outside the root. Exclusions override both automatic discovery and
-includes. If the root is a worktree, excluding `"."` removes it but leaves its
-products.
+Relative paths in both lists resolve against that workspace root, **not the
+`.pi` directory**. For example, with `--workspace-root /stage`, the file is
+`/stage/.pi/workspace.json`, and the entries above resolve to:
+
+- `components/service` → `/stage/components/service`;
+- `../shared-library` → `/shared-library`;
+- `archived-product` → `/stage/archived-product`.
+
+This base stays `/stage` even when Pi starts inside `/stage/product`. Absolute
+paths are used directly. Entries identify exact worktree roots, not glob
+patterns. Includes can opt into deeper paths, symlinked paths or repositories
+outside the root. Exclusions override both automatic discovery and includes.
+If the root is a worktree, excluding `"."` removes it but leaves its products.
 
 The file is optional; both lists default to empty. Unknown settings, invalid
 JSON and invalid path lists are reported rather than silently ignored. A missing
