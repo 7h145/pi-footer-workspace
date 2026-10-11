@@ -4,9 +4,17 @@
   "description": "Show Git and workspace writability status in Pi's footer.",
   "type": "module",
   "license": "MIT",
-  "keywords": ["pi-package", "pi", "footer", "git", "workspace"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "footer",
+    "git",
+    "workspace"
+  ],
   "pi": {
-    "extensions": ["./pi-footer-workspace.ts"]
+    "extensions": [
+      "./pi-footer-workspace.ts"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80.4"
@@ -15,5 +23,16 @@
     "@earendil-works/pi-coding-agent": {
       "optional": true
     }
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-tui": "1.1.0",
+    "@types/node": "24.10.1",
+    "typescript": "7.0.2"
   }
 }
