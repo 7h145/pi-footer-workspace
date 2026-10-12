@@ -33,9 +33,9 @@ export async function discover(exec: Exec, cwd: string, explicitRoot: string | u
 	const owner = containing.ok ? await canonical(topLevel(containing.stdout)) : undefined;
 	const root = explicitRoot === undefined ? owner ?? anchor : anchor;
 	let config: Config = { include: [], exclude: [] };
-	try { config = parseConfig(await fs.readFile(path.join(root, ".pi", "workspace.json"), "utf8")); }
+	try { config = parseConfig(await fs.readFile(path.join(root, ".pi", "git-monitor.json"), "utf8")); }
 	catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Cannot read .pi/workspace.json: use include/exclude arrays of paths");
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("Cannot read .pi/git-monitor.json: use include/exclude arrays of paths");
 	}
 	signal.throwIfAborted();
 	const inventory: Inventory = { root, repositories: [], issues: [] };

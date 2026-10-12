@@ -1,8 +1,12 @@
-# pi-footer-workspace
+# pi-git-monitor
 
 Shows where work needs attention across a workspace's Git repositories.
-The footer gives a compact summary; `/workspace` opens a read-only overview
+The footer gives a compact summary; `/git-monitor` opens a read-only overview
 with branch, working-tree and locally known upstream status.
+
+Previously published as `pi-footer-workspace`; the command, root flag and config
+filename now use `git-monitor`. Replace the old installation and, if present,
+rename `.pi/workspace.json` to `.pi/git-monitor.json` when migrating.
 
 This is useful when Pi runs in an outer development repository and the products
 live in separate repositories underneath it. Product repositories are discovered
@@ -17,7 +21,7 @@ Requires **Pi 1.0.2 or newer** and Git on `PATH`.
 Install this extension from GitHub:
 
 ```bash
-pi install git:github.com/7h145/pi-footer-workspace
+pi install git:github.com/7h145/pi-git-monitor
 ```
 
 For first-line footer placement, also install the optional
@@ -35,7 +39,7 @@ Pi's public status API and does not patch or replace the footer.
 Run `/reload` after installing or updating while Pi is running, then run:
 
 ```text
-/workspace
+/git-monitor
 ```
 
 The view lists discovered repositories. Use **↑/↓** or **j/k** to select one,
@@ -51,7 +55,7 @@ pi --no-extensions -e .
 ```
 
 This loads only the checkout's extension, without the optional compositor or
-duplicate installed copies. Then run `/workspace`.
+duplicate installed copies. Then run `/git-monitor`.
 
 ## Workspace scope
 
@@ -73,7 +77,7 @@ siblings. To keep the larger workspace visible, specify its root:
 
 ```bash
 cd /stage/product
-pi --workspace-root /stage
+pi --git-monitor-root /stage
 ```
 
 The flag is registered by this extension, so the extension must be loaded.
@@ -81,8 +85,8 @@ Relative flag paths resolve against Pi's startup working directory.
 
 ### Include or exclude repositories
 
-Create `.pi/workspace.json` under the **workspace root**: the directory selected
-by `--workspace-root`, or by default the Git worktree containing Pi's working
+Create `.pi/git-monitor.json` under the **workspace root**: the directory selected
+by `--git-monitor-root`, or by default the Git worktree containing Pi's working
 directory (the working directory itself if it is outside Git).
 
 ```json
@@ -93,8 +97,8 @@ directory (the working directory itself if it is outside Git).
 ```
 
 Relative paths in both lists resolve against that workspace root, **not the
-`.pi` directory**. For example, with `--workspace-root /stage`, the file is
-`/stage/.pi/workspace.json`, and the entries above resolve to:
+`.pi` directory**. For example, with `--git-monitor-root /stage`, the file is
+`/stage/.pi/git-monitor.json`, and the entries above resolve to:
 
 - `components/service` → `/stage/components/service`;
 - `../shared-library` → `/shared-library`;
@@ -108,7 +112,7 @@ If the root is a worktree, excluding `"."` removes it but leaves its products.
 
 The file is optional; both lists default to empty. Unknown settings, invalid
 JSON and invalid path lists are reported rather than silently ignored. A missing
-or invalid included repository is a discovery notice. Run `/workspace` after
+or invalid included repository is a discovery notice. Run `/git-monitor` after
 changing the configuration or adding/removing a repository.
 
 ## Footer summary
@@ -145,7 +149,7 @@ other probe failures and cleanup failures appear in workspace notices.
 
 ## Inspecting repositories
 
-`/workspace` refreshes discovery, Git status and writability before opening a
+`/git-monitor` refreshes discovery, Git status and writability before opening a
 snapshot. It waits for its own refresh, including when another scan is running.
 The view does not update underneath you; close and reopen it for a new snapshot.
 
@@ -161,24 +165,24 @@ Changed-file details show Git's two status columns: **index / worktree**.
 `R` renamed, `C` copied, `T` type changed, and `U` unmerged. Rename details
 also show the original path. Control characters in paths are escaped for display.
 
-You can open one repository directly using its displayed name or full path:
+Every command refreshes before displaying its snapshot:
 
-```text
-/workspace product
-```
+| Command | Output |
+|---|---|
+| `/git-monitor` | Interactive overview |
+| `/git-monitor view` or `/git-monitor v` | Interactive overview |
+| `/git-monitor view <repo>` or `/git-monitor v <repo>` | Interactive repository details |
+| `/git-monitor status` or `/git-monitor s` | Textual overview |
+| `/git-monitor status <repo>` or `/git-monitor s <repo>` | Textual repository details |
+
+`<repo>` is a displayed repository name or full path. Everything after the
+subcommand is the selector, so names and paths containing spaces need no quotes.
+Tab completes the long and short subcommands. Explicit subcommands also let you
+select a repository named `status`, for example `/git-monitor v status`.
 
 Ahead/behind counts use **local tracking refs**. The extension does not fetch,
 so “up to date” is not a claim about the remote's present state. No upstream
 is shown as `—`; unavailable counts or Git failures are shown explicitly.
-
-The older command remains available:
-
-```text
-/footer-workspace-refresh
-```
-
-It performs the same refresh and reports a textual overview without opening
-the interactive view.
 
 ## Refresh behavior and limits
 
@@ -202,10 +206,11 @@ and many untracked files can make scans expensive. Discovery notices, Git
 failures and stale snapshots remain visible rather than implying a complete,
 fresh result.
 
-RPC mode supports manual commands through notifications: `/workspace` returns
-a textual overview and `/workspace product` returns details. It performs no
-automatic polling and publishes no footer status. Print and JSON modes reject
-commands before scanning because their UI output would not be visible.
+RPC mode supports manual commands through notifications. `/git-monitor`,
+`view`/`v` and `status`/`s` all return a textual overview, or details when a
+repository is specified. RPC performs no automatic polling and publishes no
+footer status. Print and JSON modes reject commands before scanning because
+their UI output would not be visible.
 
 All Git commands inspect local state with optional index updates disabled.
 The extension does not stage, commit, switch, push or fetch, does not send

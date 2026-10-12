@@ -1,7 +1,7 @@
 {
-  "name": "pi-footer-workspace",
+  "name": "pi-git-monitor",
   "version": "0.1.0",
-  "description": "Summarize multiple Git worktrees in Pi\u2019s footer and inspect them with /workspace.",
+  "description": "Monitor Git repositories across a workspace, with a compact status summary and an interactive overview.",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -9,11 +9,12 @@
     "pi",
     "footer",
     "git",
+    "monitor",
     "workspace"
   ],
   "pi": {
     "extensions": [
-      "./pi-footer-workspace.ts"
+      "./pi-git-monitor.ts"
     ]
   },
   "peerDependencies": {

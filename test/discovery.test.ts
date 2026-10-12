@@ -37,7 +37,7 @@ test("includes allow deeper repos and aliases; exclusions and deduplication use 
 	await repository(join(root, "container", "deep"));
 	await symlink(one, join(root, "alias"), "dir");
 	await mkdir(join(root, ".pi"));
-	await writeFile(join(root, ".pi", "workspace.json"), JSON.stringify({ include: ["alias", "container/deep", "ordinary"], exclude: ["one"] }));
+	await writeFile(join(root, ".pi", "git-monitor.json"), JSON.stringify({ include: ["alias", "container/deep", "ordinary"], exclude: ["one"] }));
 	await mkdir(join(root, "ordinary"));
 	const inventory = await discover(exec, root, undefined, signal());
 	assert.deepEqual(inventory.repositories.map(repo => repo.label), ["workspace", "container/deep"]);
@@ -59,8 +59,8 @@ for (const value of ['[]', '{"depth":4}', '{"include":"one"}', '{"exclude":[null
 }
 test("bad configuration is not silently replaced by defaults", async t => {
 	const root = await repository(await temporary(t)); await mkdir(join(root, ".pi"));
-	await writeFile(join(root, ".pi", "workspace.json"), "not json");
-	await assert.rejects(discover(exec, root, undefined, signal()), /workspace.json/);
+	await writeFile(join(root, ".pi", "git-monitor.json"), "not json");
+	await assert.rejects(discover(exec, root, undefined, signal()), /git-monitor.json/);
 });
 
 test("submodule Git files are discovered as distinct worktrees", async t => {
@@ -71,7 +71,7 @@ test("submodule Git files are discovered as distinct worktrees", async t => {
 });
 test("missing includes leave scope visibly incomplete", async t => {
 	const root = await temporary(t);await mkdir(join(root, ".pi"));
-	await writeFile(join(root, ".pi", "workspace.json"), JSON.stringify({ include: ["missing"] }));
+	await writeFile(join(root, ".pi", "git-monitor.json"), JSON.stringify({ include: ["missing"] }));
 	const inventory = await discover(exec, root, undefined, signal());
 	assert.equal(inventory.repositories.length, 0);assert.match(inventory.issues[0], /included repository/);
 });
@@ -85,4 +85,12 @@ test("null configuration lists are invalid", () => assert.throws(() => parseConf
 test("a child named workspace does not collide with the root label", async t => {
 	const root = await repository(await temporary(t));await repository(join(root, "workspace"));
 	assert.deepEqual((await discover(exec, root, undefined, signal())).repositories.map(repo => repo.label), ["workspace", "./workspace"]);
+});
+test("only git-monitor.json is read; the old filename is not a fallback or merged", async t => {
+	const root = await repository(await temporary(t));await repository(join(root, "one"));
+	await mkdir(join(root, ".pi"));
+	await writeFile(join(root, ".pi", "workspace.json"), JSON.stringify({ exclude: ["."] }));
+	assert.deepEqual((await discover(exec, root, undefined, signal())).repositories.map(repo => repo.label), ["workspace", "one"]);
+	await writeFile(join(root, ".pi", "git-monitor.json"), JSON.stringify({ exclude: ["one"] }));
+	assert.deepEqual((await discover(exec, root, undefined, signal())).repositories.map(repo => repo.label), ["workspace"]);
 });

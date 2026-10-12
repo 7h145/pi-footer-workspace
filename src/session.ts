@@ -89,7 +89,7 @@ export class WorkspaceSession {
 				this.discoveryFailure = undefined;
 			} catch (error) {
 				signal.throwIfAborted();
-				this.discoveryFailure = error instanceof Error && error.message.startsWith("Cannot read .pi/workspace.json")
+				this.discoveryFailure = error instanceof Error && error.message.startsWith("Cannot read .pi/git-monitor.json")
 					? error.message : "Cannot discover workspace repositories";
 				return { root: inventory?.root ?? this.explicitRoot ?? this.cwd, cwd: this.cwd,
 					repositories: (inventory?.repositories ?? []).map(repo => ({ ...repo, error: "Workspace discovery failed" })),

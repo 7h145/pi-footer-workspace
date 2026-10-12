@@ -68,18 +68,18 @@ test("probe may finish cleanup after stop without publishing or starting Git", a
 
 test("writability remains available when configuration discovery fails", async () => {
 	const deps = fakeDependencies();deps.probe = async () => ({ readOnly: true });
-	deps.discover = async () => { throw new Error("Cannot read .pi/workspace.json: invalid"); };
+	deps.discover = async () => { throw new Error("Cannot read .pi/git-monitor.json: invalid"); };
 	const session = new WorkspaceSession("/", undefined, deps, () => {});
 	const snapshot = await session.request();assert.equal(snapshot.writability.readOnly, true);
-	assert.match(snapshot.issues[0], /workspace.json/);session.stop();
+	assert.match(snapshot.issues[0], /git-monitor.json/);session.stop();
 });
 
 test("polling cannot erase a failed configuration refresh", async () => {
 	const deps = fakeDependencies();const original = deps.discover;
 	const session = new WorkspaceSession("/", undefined, deps, () => {});
-	await session.request();deps.discover = async () => { throw new Error("Cannot read .pi/workspace.json: invalid"); };
+	await session.request();deps.discover = async () => { throw new Error("Cannot read .pi/git-monitor.json: invalid"); };
 	await session.request({ discover: true });
-	assert.match((await session.request()).issues[0], /workspace.json/);
+	assert.match((await session.request()).issues[0], /git-monitor.json/);
 	deps.discover = original;
 	assert.deepEqual((await session.request({ discover: true })).issues, []);session.stop();
 });

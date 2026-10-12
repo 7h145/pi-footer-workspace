@@ -13,7 +13,7 @@
     ]
   },
   "include": [
-    "pi-footer-workspace.ts",
+    "pi-git-monitor.ts",
     "src/**/*.ts",
     "test/**/*.ts"
   ]

@@ -1,12 +1,13 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { setup } from "../pi-footer-workspace.ts";
+import { setup } from "../pi-git-monitor.ts";
 import { fakeDependencies, clean, deferred, flush } from "./helpers.ts";
 function fixture(t: TestContext, mode = "tui", root?: string) {
 	const deps = fakeDependencies();
 	const handlers = new Map<string, (event: any, ctx: ExtensionContext) => void>();
-	const commands = new Map<string, { handler(args: string, ctx: ExtensionCommandContext): Promise<void> }>();
+	const commands = new Map<string, Parameters<ExtensionAPI["registerCommand"]>[1]>();
+	const flags = new Map<string, unknown>();const views: string[][] = [];
 	const statuses = new Map<string, string | undefined>();const notifications: string[] = [];
 	let discoveries = 0, scans = 0, probes = 0, idle = true, custom = 0, currentTheme = "initial";
 	const discover = deps.discover;deps.discover = (...args) => { discoveries++;return discover(...args); };
@@ -16,17 +17,24 @@ function fixture(t: TestContext, mode = "tui", root?: string) {
 		ui: { theme: { fg: (color: string, text: string) => `${currentTheme}:${color}:${text}` },
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
 			notify: (message: string) => notifications.push(message),
-			custom: async () => { custom++; } } } as unknown as ExtensionCommandContext;
+			custom: async (factory: any) => {
+				custom++;
+				const view = factory({ terminal: { rows: 24 }, requestRender() {} }, ctx.ui.theme, {}, () => {});
+				views.push(view.render(110));
+			} } } as unknown as ExtensionCommandContext;
 	const api = { on: (event: string, handler: any) => handlers.set(event, handler),
 		registerCommand: (name: string, command: any) => commands.set(name, command),
-		registerFlag: () => {}, getFlag: () => root } as unknown as ExtensionAPI;
+		registerFlag: (name: string, flag: unknown) => flags.set(name, flag),
+		getFlag: (name: string) => name === "git-monitor-root" ? root : undefined } as unknown as ExtensionAPI;
 	setup(api, deps);
 	t.after(() => handlers.get("session_shutdown")!({}, ctx));
-	return { ctx, deps, statuses, notifications, handlers, start: () => handlers.get("session_start")!({}, ctx),
-		command: (name = "workspace", args = "") => commands.get(name)!.handler(args, ctx),
+	return { ctx, deps, statuses, notifications, handlers, commands, flags, views,
+		start: () => handlers.get("session_start")!({}, ctx),
+		command: (args = "") => commands.get("git-monitor")!.handler(args, ctx),
+		completions: (prefix: string) => commands.get("git-monitor")!.getArgumentCompletions?.(prefix),
 		counts: () => ({ discoveries, scans, probes, custom }),
 		idle: (value: boolean) => { idle = value; }, theme: (value: string) => { currentTheme = value; },
-		status: () => statuses.get("footer-compositor:right:10:workspace-git") };
+		status: () => statuses.get("footer-compositor:right:10:git-monitor-status") };
 }
 test("startup displays aggregate; idle polling uses cached membership", async t => {
 	t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: 10_000 });
@@ -48,10 +56,10 @@ test("busy-state cache becomes stale and theme updates without Git requests", as
 	t.mock.timers.tick(60_000);await flush();assert.equal(f.status(), "changed:warning:git 1 clean?");
 	assert.equal(f.counts().scans, 1);
 });
-test("commands refresh membership and probe; workspace opens read-only view", async t => {
+test("commands refresh membership and probe; monitor opens read-only view", async t => {
 	const f = fixture(t);f.start();await flush();await f.command();
 	assert.deepEqual(f.counts(), { discoveries: 2, scans: 2, probes: 2, custom: 1 });
-	await f.command("footer-workspace-refresh");assert.match(f.notifications[0], /git 1 clean/);
+	await f.command("status");assert.match(f.notifications[0], /git 1 clean/);
 });
 test("pending manual command cannot notify or open a view after shutdown", async t => {
 	const f = fixture(t);f.start();await flush();const pending = deferred<{ status: typeof clean }>();f.deps.readStatus = () => pending.promise;
@@ -79,6 +87,66 @@ test("explicit root is resolved once relative to startup cwd", async t => {
 	f.start();await f.command();assert.equal(root, "/");
 });
 test("unknown repository arguments do not scan arbitrary paths or open a view", async t => {
-	const f = fixture(t, "rpc");f.start();await f.command("workspace", "/not-in-inventory");
+	const f = fixture(t, "rpc");f.start();await f.command("view /not-in-inventory");
 	assert.match(f.notifications[0], /not in this workspace/);assert.equal(f.counts().custom, 0);
+});
+
+test("only the monitor command and root flag are registered", t => {
+	const f = fixture(t);
+	assert.deepEqual([...f.commands.keys()], ["git-monitor"]);
+	assert.deepEqual([...f.flags.keys()], ["git-monitor-root"]);
+});
+test("Tab completes long and short subcommands without scanning", async t => {
+	const f = fixture(t);
+	assert.deepEqual((await f.completions(""))?.map(item => item.value), ["view", "v", "status", "s"]);
+	assert.deepEqual((await f.completions("v"))?.map(item => item.value), ["view", "v"]);
+	assert.deepEqual((await f.completions("s"))?.map(item => item.value), ["status", "s"]);
+	assert.equal(await f.completions("view "), null);
+	assert.deepEqual(f.counts(), { discoveries: 0, scans: 0, probes: 0, custom: 0 });
+});
+for (const action of ["view", "v", "status", "s"]) {
+	test(`${action} refreshes and opens the correct output in TUI`, async t => {
+		const f = fixture(t);f.start();await flush();await f.command(action);
+		assert.deepEqual(f.counts(), { discoveries: 2, scans: 2, probes: 2,
+			custom: action === "view" || action === "v" ? 1 : 0 });
+		if (action === "view" || action === "v") assert.match(f.views[0].join("\n"), /Workspace: \/synthetic/);
+		else assert.match(f.notifications[0], /git 1 clean/);
+	});
+	test(`${action} can select a repository named status`, async t => {
+		const f = fixture(t);f.deps.discover = async () => ({ root: "/synthetic", issues: [],
+			repositories: [{ path: "/synthetic/status", label: "status" }] });
+		await f.command(`${action} status`);
+		if (action === "view" || action === "v") assert.match(f.views[0].join("\n"), /Repository: status/);
+		else assert.ok(f.notifications[0].startsWith("/synthetic/status\n"));
+	});
+	test(`${action} preserves spaces in repository paths`, async t => {
+		const f = fixture(t, "rpc");f.deps.discover = async () => ({ root: "/synthetic", issues: [],
+			repositories: [{ path: "/synthetic/my  product", label: "my  product" }] });
+		await f.command(`  ${action}\t/synthetic/my  product  `);
+		assert.ok(f.notifications[0].startsWith("/synthetic/my  product\n"));
+		assert.equal(f.counts().custom, 0);
+	});
+	test(`${action} cannot publish late output after shutdown`, async t => {
+		const f = fixture(t);const pending = deferred<{ status: typeof clean }>();f.deps.readStatus = () => pending.promise;
+		const command = f.command(action);await flush();f.handlers.get("session_shutdown")!({}, f.ctx);await command;
+		pending.resolve({ status: clean });await flush();
+		assert.equal(f.notifications.length, 0);assert.equal(f.counts().custom, 0);assert.equal(f.status(), undefined);
+	});
+	for (const mode of ["print", "json"]) {
+		test(`${action} rejects ${mode} mode before scanning`, async t => {
+			const f = fixture(t, mode);await assert.rejects(f.command(action), /requires TUI or RPC/);
+			assert.deepEqual(f.counts(), { discoveries: 0, scans: 0, probes: 0, custom: 0 });
+		});
+	}
+}
+test("invalid verbs and bare repository arguments show usage without scanning", async t => {
+	const f = fixture(t);
+	for (const args of ["show", "refresh", "product", "viewed"]) await f.command(args);
+	assert.equal(f.notifications.length, 4);assert.ok(f.notifications.every(text => text.startsWith("Usage: /git-monitor")));
+	assert.deepEqual(f.counts(), { discoveries: 0, scans: 0, probes: 0, custom: 0 });
+});
+test("status and s print the same report, view and v render the same snapshot", async t => {
+	const f = fixture(t);
+	await f.command("status");await f.command("s");assert.equal(f.notifications[0], f.notifications[1]);
+	await f.command("view");await f.command("v");assert.deepEqual(f.views[0], f.views[1]);
 });

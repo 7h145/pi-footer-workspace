@@ -1,7 +1,7 @@
-/** pi-footer-workspace
+/** pi-git-monitor
  *
  * Purpose: summarize the owning and product Git worktrees, with a read-only
- * /workspace overview and an optional working-directory (ro) marker.
+ * /git-monitor overview and an optional working-directory (ro) marker.
  *
  * Strategy: discover shallowly, collect local Git status with bounded parallel
  * requests, and publish through Pi's public status API. Each session owns its
@@ -19,13 +19,15 @@ import { dependencies, WorkspaceSession, type Dependencies } from "./src/session
 import { details, overview, summary } from "./src/format.ts";
 import { WorkspaceView } from "./src/view.ts";
 
-const LEFT_KEY = "footer-compositor:left:10:workspace-read-only";
-const RIGHT_KEY = "footer-compositor:right:10:workspace-git";
+const LEFT_KEY = "footer-compositor:left:10:git-monitor-read-only";
+const RIGHT_KEY = "footer-compositor:right:10:git-monitor-status";
+const SUBCOMMANDS = ["view", "v", "status", "s"];
+const USAGE = "Usage: /git-monitor [view|v|status|s] [repository name or full path]";
 const POLL_MS = 15_000;
 const STALE_MS = 60_000;
 const DEBOUNCE_MS = 500;
 
-export default function footerWorkspace(pi: ExtensionAPI) { setup(pi, dependencies(pi.exec.bind(pi))); }
+export default function gitMonitor(pi: ExtensionAPI) { setup(pi, dependencies(pi.exec.bind(pi))); }
 
 /** Dependency injection is used only by the regression tests. */
 export function setup(pi: ExtensionAPI, deps: Dependencies) {
@@ -37,7 +39,7 @@ export function setup(pi: ExtensionAPI, deps: Dependencies) {
 	let configuredRoot: string | undefined;
 	let rootResolved = false;
 	const published = new Map<string, string | undefined>();
-	pi.registerFlag("workspace-root", { type: "string", description: "Root for workspace repository discovery (relative to startup cwd)" });
+	pi.registerFlag("git-monitor-root", { type: "string", description: "Root for Git repository discovery (relative to startup cwd)" });
 
 	function setStatus(ctx: ExtensionContext, key: string, text: string | undefined) {
 		if (published.has(key) && published.get(key) === text) return;
@@ -64,7 +66,7 @@ export function setup(pi: ExtensionAPI, deps: Dependencies) {
 	function start(ctx: ExtensionContext) {
 		dispose();
 		if (!rootResolved) {
-			const flag = pi.getFlag("workspace-root");
+			const flag = pi.getFlag("git-monitor-root");
 			configuredRoot = typeof flag === "string" && flag ? resolve(ctx.cwd, flag) : undefined;
 			rootResolved = true;
 		}
@@ -120,18 +122,21 @@ export function setup(pi: ExtensionAPI, deps: Dependencies) {
 		}
 	});
 
-	async function command(args: string, ctx: ExtensionContext, refreshOnly: boolean) {
-		if (!ctx.hasUI) throw new Error("/workspace requires TUI or RPC mode; no workspace scan was started");
+	async function command(args: string, ctx: ExtensionContext) {
+		if (!ctx.hasUI) throw new Error("/git-monitor requires TUI or RPC mode; no workspace scan was started");
+		// Only split the verb: repository names and paths can contain spaces.
+		const parsed = /^(\S+)(?:\s+([\s\S]*))?$/.exec(args.trim());
+		const action = parsed?.[1] ?? "view";
+		if (!SUBCOMMANDS.includes(action)) { ctx.ui.notify(USAGE, "warning"); return; }
+		const name = parsed?.[2]?.trim();
 		const current = currentSession(ctx);
 		try {
 			const snapshot = await current.request({ discover: true, probe: true });
 			if (session !== current || current.closed) return;
 			nextPoll = Date.now() + POLL_MS;
-			if (refreshOnly) { ctx.ui.notify(overview(snapshot).join("\n"), "info"); return; }
-			const name = args.trim();
 			const index = name ? snapshot.repositories.findIndex(repo => repo.label === name || repo.path === name) : undefined;
-			if (index === -1) { ctx.ui.notify("Repository not in this workspace. Run /workspace to see repository names.", "warning"); return; }
-			if (ctx.mode === "rpc") {
+			if (index === -1) { ctx.ui.notify("Repository not in this workspace. Run /git-monitor to see repository names.", "warning"); return; }
+			if (action === "status" || action === "s" || ctx.mode === "rpc") {
 				ctx.ui.notify((index === undefined ? overview(snapshot) : details(snapshot.repositories[index])).join("\n"), "info");
 				return;
 			}
@@ -141,8 +146,12 @@ export function setup(pi: ExtensionAPI, deps: Dependencies) {
 			if (session === current && !current.closed) ctx.ui.notify("Workspace refresh failed", "error");
 		}
 	}
-	pi.registerCommand("workspace", { description: "Refresh and inspect workspace repositories (optional repository name)",
-		handler: (args, ctx) => command(args, ctx, false) });
-	pi.registerCommand("footer-workspace-refresh", { description: "Refresh workspace discovery, Git status and writability",
-		handler: (args, ctx) => command(args, ctx, true) });
+	pi.registerCommand("git-monitor", {
+		description: "Refresh Git repositories: view/v opens a snapshot; status/s prints a report (optional repository)",
+		getArgumentCompletions: prefix => {
+			const matches = SUBCOMMANDS.filter(value => value.startsWith(prefix));
+			return matches.length ? matches.map(value => ({ value, label: value })) : null;
+		},
+		handler: command,
+	});
 }
